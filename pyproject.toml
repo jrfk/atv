@@ -1,0 +1,16 @@
+[project]
+name = "taskscope"
+version = "0.1.0"
+description = "Textual-based TUI for watching asyncio task hierarchies"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "textual>=0.57,<0.61",
+    "psutil>=5.9",
+]
+
+[project.scripts]
+taskscope = "taskscope.cli:main"
+
+[tool.uv]
+package = true
