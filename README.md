@@ -1,6 +1,6 @@
 # atv 🌱
 
-<img width="1200" height="604" alt="image" src="https://github.com/user-attachments/assets/5f691977-c9fd-4d59-bc4c-c667275f64fa" />
+<img width="800" height="403" alt="image" src="https://github.com/user-attachments/assets/1a8000b2-2eee-42f9-a9ac-b6ecb79c9e60" />
 
 
 atv(async task viewer) is a CLI for exploring Python `asyncio` processes with a Textual UI. It starts by listing Python processes running locally, and we plan to integrate execution of `asyncio ps` / `pstree` and call-graph visualization.
