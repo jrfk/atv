@@ -1,14 +1,14 @@
-# TaskScope 🌱
+# atv 🌱
 
 <img width="2850" height="1480" alt="image" src="https://github.com/user-attachments/assets/9b8916b7-4ca0-4715-b63b-280f2c1bf8fd" />
 
 
-TaskScope is a CLI for exploring Python `asyncio` processes with a Textual UI. It starts by listing Python processes running locally, and we plan to integrate execution of `asyncio ps` / `pstree` and call-graph visualization.
+atv(async task viewer) is a CLI for exploring Python `asyncio` processes with a Textual UI. It starts by listing Python processes running locally, and we plan to integrate execution of `asyncio ps` / `pstree` and call-graph visualization.
 
 ## Setup
 
 ```bash
-cd TaskScope
+cd atv
 uv sync
 ```
 
@@ -17,7 +17,7 @@ uv sync
 ## Usage
 
 ```bash
-uv run taskscope
+uv run atv
 ```
 
 Shortcuts:
@@ -31,13 +31,13 @@ Shortcuts:
 Once released, you'll be able to launch it with a one-liner.
 
 ```bash
-uvx taskscope
+uvx atv
 ```
 
 If you want to test uvx behavior during local development, run the following in the project root.
 
 ```bash
-uvx --from . taskscope
+uvx --from . atv
 ```
 
 ## Roadmap
