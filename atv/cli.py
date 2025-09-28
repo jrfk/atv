@@ -1,14 +1,14 @@
-"""Command-line entry points for TaskScope."""
+"""Command-line entry points for atv."""
 
 from __future__ import annotations
 
-from .app import TaskScopeApp
+from .app import AtvApp
 
 
 def main() -> None:
     """Launch the Textual application."""
 
-    TaskScopeApp().run()
+    AtvApp().run()
 
 
 if __name__ == "__main__":

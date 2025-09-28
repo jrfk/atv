@@ -1,4 +1,4 @@
-"""Textual application scaffolding for TaskScope."""
+"""Textual application scaffolding for atv."""
 
 from __future__ import annotations
 
@@ -63,8 +63,8 @@ class ProcessTable(DataTable):
             self.cursor_coordinate = (0, 0)
 
 
-class TaskScopeApp(App):
-    """Primary Textual application for TaskScope."""
+class AtvApp(App):
+    """Primary Textual application for atv."""
 
     CSS = """
     #content {
@@ -102,7 +102,7 @@ class TaskScopeApp(App):
     }
     """
 
-    TITLE = "TaskScope"
+    TITLE = "atv"
     SUB_TITLE = "Asyncio process discovery (alpha)"
 
     BINDINGS = [

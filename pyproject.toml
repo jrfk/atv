@@ -1,7 +1,7 @@
 [project]
-name = "taskscope"
+name = "atv"
 version = "0.1.0"
-description = "Textual-based TUI for watching asyncio task hierarchies"
+description = "TaskScope: a TUI tool for experimenting with Python 3.14 asyncio ps/pstree features"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [project.scripts]
-taskscope = "taskscope.cli:main"
+atv = "atv.cli:main"
 
 [tool.uv]
 package = true

@@ -94,7 +94,7 @@ wheels = [
 ]
 
 [[package]]
-name = "taskscope"
+name = "atv"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

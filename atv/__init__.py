@@ -1,4 +1,4 @@
-"""TaskScope package metadata."""
+"""atv package metadata."""
 
 from __future__ import annotations
 

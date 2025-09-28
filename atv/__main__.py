@@ -1,4 +1,4 @@
-"""Support ``python -m taskscope``."""
+"""Support ``python -m atv``."""
 
 from __future__ import annotations
 
