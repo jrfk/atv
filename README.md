@@ -3,7 +3,6 @@
 [![PyPI][pypi-badge]][pypi-link]
 [![Python versions][versions-badge]][pypi-link]
 [![GitHub Actions][github-ci-badge]][github-ci-link]
-[![PyPI - Download][downloads-badge]][downloads-link]
 [![License][license-badge]][license-link]
 
 <img width="800" height="403" alt="image" src="https://github.com/user-attachments/assets/1a8000b2-2eee-42f9-a9ac-b6ecb79c9e60" />
@@ -62,7 +61,5 @@ This project is licensed under the MIT License. See `LICENSE` for details.
 [versions-badge]: https://img.shields.io/pypi/pyversions/atv.svg
 [github-ci-badge]: https://github.com/jrfk/atv/actions/workflows/workflow.yml/badge.svg
 [github-ci-link]: https://github.com/jrfk/atv/actions/workflows/workflow.yml
-[downloads-badge]: https://img.shields.io/pypi/dm/atv.svg
-[downloads-link]: https://pypistats.org/packages/atv
-[license-badge]: https://img.shields.io/pypi/l/atv.svg
+[license-badge]: https://img.shields.io/github/license/jrfk/atv
 [license-link]: https://github.com/jrfk/atv/blob/main/LICENSE
