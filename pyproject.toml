@@ -29,6 +29,7 @@ build-backend = "hatchling.build"
 source = "vcs"
 tag-pattern = "v(?P<version>.+)"
 fallback-version = "0.0.0"
+raw-options = { local_scheme = "no-local-version" }
 
 [tool.hatch.build.hooks.vcs]
 version-file = "atv/__about__.py"
