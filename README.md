@@ -8,7 +8,7 @@
 <img width="800" height="403" alt="image" src="https://github.com/user-attachments/assets/1a8000b2-2eee-42f9-a9ac-b6ecb79c9e60" />
 
 
-atv(async task viewer) is a CLI for exploring Python `asyncio` processes with a Textual UI. It starts by listing Python processes running locally, and we plan to integrate execution of `asyncio ps` / `pstree` and call-graph visualization.
+atv (async task viewer) is a Textual UI for discovering Python processes, inspecting asyncio tasks and await trees, comparing snapshots, and capturing Tachyon flame graphs.
 
 ## Setup
 
@@ -25,11 +25,56 @@ uv sync
 uv run atv
 ```
 
-Shortcuts:
+### Inspect and profile
 
-- `R` – Refresh the process list (the table shows PID / Process / File / Command Line)
-- `Q` – Exit
-- `Enter` / `P` – Run `python -m asyncio ps` for the selected PID and display the result in the right pane
+Select a process in the left pane, then use:
+
+| Key | Action |
+| --- | --- |
+| `R` | Refresh processes, keeping the selected PID when possible |
+| `Enter` / `P` | Capture `asyncio ps` |
+| `T` | Capture `asyncio pstree` |
+| `S` | Save the last successful task/tree snapshot as text |
+| `D` | Compare the last two captures of the same PID and view |
+| `F` | Capture a Tachyon flame graph of running asyncio tasks |
+| `G` | Capture a Tachyon flame graph including waiting tasks |
+| `O` | Open the last successful flame graph in a browser |
+| `X` | Cancel the current observation |
+| `Q` | Exit |
+
+Task snapshots show the state at capture time. Flame graphs aggregate samples
+across a time window. Snapshot diffs are textual: task IDs, stack lines and
+ordering changes may appear in the diff; this is not a task lifecycle tracker.
+Capture twice with P or T before using D. Saved snapshots and profiles get unique
+filenames under `~/.atv/captures`; captures are never overwritten automatically.
+
+Profiling requires an observer with `profiling.sampling` (Python 3.15+).
+Task inspection remains available with Python 3.14. Choose an observer matching
+the target Python minor version and standard/free-threaded build; pre-release
+versions may require an exact version match.
+
+```bash
+uv run atv --python "$(uv python find 3.15)" --duration 10
+uv run atv --output-dir ./captures
+```
+
+`--duration` accepts 1–300 seconds. F and G attach only to the selected process;
+X cancels the observer, not the target. atv does not invoke sudo automatically.
+On macOS, process observation may require elevated privileges. Use the
+[Python permission guide](https://docs.python.org/3/howto/remote_debugging.html#permission-requirements)
+to configure your environment. Errors remain visible in the output pane.
+When running atv under sudo, set `--output-dir` explicitly if desired; generated
+files belong to that user and the browser may need to be opened manually.
+
+### Development checks
+
+```bash
+uv run python -m unittest discover -s tests -v
+```
+
+The suite checks subprocess errors, cancellation/timeout cleanup, and headless
+UI interactions with mocked external inspection. It does not require attaching
+to other processes or elevated privileges.
 
 ### Using uvx
 
@@ -47,10 +92,9 @@ uvx --from . atv
 
 ## Roadmap
 
-- View that periodically runs `python -m asyncio ps` for the selected process
-- Visualization for `asyncio pstree` / `format_call_graph`
-- Snapshot capture and diff comparison
-- Integration with the FastAPI demo (retrieve task information via the API)
+- Structured task navigation and lifecycle-aware snapshot comparison
+- Periodic task inspection with an explicit refresh interval
+- Integration with application-provided task information
 
 ## License
 
