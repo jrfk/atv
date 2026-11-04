@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import difflib
+from pathlib import Path
+import shlex
+import webbrowser
 from typing import Iterable
 
 from textual.app import App, ComposeResult
@@ -12,6 +16,7 @@ from textual.containers import Container
 from textual.coordinate import Coordinate
 from textual.widgets import DataTable, Footer, Header, Log, Static
 
+from .inspection import artifact_path, execute, profile_command
 from .processes import ProcessInfo, list_python_processes
 
 
@@ -47,6 +52,7 @@ class ProcessTable(DataTable):
     def update_processes(self, processes: Iterable[ProcessInfo]) -> None:
         """Replace the table content with the given process collection."""
 
+        selected = self.get_selected_pid()
         self.clear(columns=False)
         for info in processes:
             display_name = info.name or "(unknown)"
@@ -61,6 +67,11 @@ class ProcessTable(DataTable):
 
         if self.row_count:
             self.cursor_coordinate = (0, 0)
+            if selected is not None:
+                for row in range(self.row_count):
+                    if str(self.get_cell_at(Coordinate(row, 0))) == str(selected):
+                        self.cursor_coordinate = (row, 0)
+                        break
 
 
 class AtvApp(App):
@@ -103,12 +114,33 @@ class AtvApp(App):
     """
 
     TITLE = "atv"
-    SUB_TITLE = "Asyncio process discovery (alpha)"
+    SUB_TITLE = "Task inspection and Tachyon profiling"
+
+    def __init__(self, *, python: str = sys.executable, duration: int = 10,
+                 output_dir: Path | None = None):
+        super().__init__()
+        self.python = python
+        self.duration = duration
+        self.output_dir = (output_dir or Path.home() / ".atv" / "captures").expanduser().resolve()
+        self.snapshots: dict[tuple[int, str], str] = {}
+        self.current_snapshot: tuple[int, str, str] | None = None
+        self.current_diff: str | None = None
+        self.last_profile: Path | None = None
+        self.busy = False
+        self.operation = None
+
 
     BINDINGS = [
         Binding("r", "refresh_processes", "Refresh", priority=True),
         Binding("enter", "inspect_selected", "Inspect"),
         Binding("p", "inspect_selected", "Inspect"),
+        Binding("t", "inspect_tree", "Await tree"),
+        Binding("s", "save_snapshot", "Save"),
+        Binding("d", "show_diff", "Diff"),
+        Binding("f", "profile_running", "Profile running"),
+        Binding("g", "profile_all", "Profile all"),
+        Binding("o", "open_profile", "Open HTML"),
+        Binding("x", "cancel_operation", "Cancel"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -118,7 +150,9 @@ class AtvApp(App):
             Container(
                 Static(
                     "Select a Python process to inspect. Press R to refresh. \n"
-                    "Press Enter to capture `python -m asyncio ps <pid>`.",
+                    "Enter: tasks · T: await tree\n"
+                    "F: running tasks · G: include waiting tasks\n"
+                    f"Profile: {self.duration}s · observer: {self.python}",
                     id="intro",
                 ),
                 ProcessTable(id="process-table"),
@@ -142,26 +176,115 @@ class AtvApp(App):
         self.refresh_process_list()
 
     def action_inspect_selected(self) -> None:
-        """Run ``python -m asyncio ps`` for the highlighted process."""
+        self.start_operation("ps")
 
-        table = self.query_one(ProcessTable)
-        pid = table.get_selected_pid()
-        if pid is None:
-            self.notify("Select a Python process first.", severity="warning", timeout=3)
+    def action_inspect_tree(self) -> None:
+        self.start_operation("pstree")
+
+    def action_profile_running(self) -> None:
+        self.start_operation("running")
+
+    def action_profile_all(self) -> None:
+        self.start_operation("all")
+
+    def start_operation(self, kind: str) -> None:
+        if self.busy:
+            self.notify("An observation is running. Press X to cancel it first.")
             return
+        pid = self.query_one(ProcessTable).get_selected_pid()
+        if pid is None:
+            self.notify("Select a Python process first.", severity="warning")
+            return
+        self.busy = True
+        self.query_one("#ps-title", Static).update(f"{kind}: observing PID {pid}…")
+        self.query_one("#ps-output", Log).clear()
+        self.operation = self.run_worker(self.observe(pid, kind), name=f"{kind}-{pid}")
 
-        header = self.query_one("#ps-title", Static)
-        header.update(f"Running asyncio ps for PID {pid}…")
+    def action_cancel_operation(self) -> None:
+        if self.busy and self.operation is not None:
+            self.operation.cancel()
+
+    def display(self, title: str, content: str) -> None:
+        self.query_one("#ps-title", Static).update(title)
         log = self.query_one("#ps-output", Log)
         log.clear()
-        log.write("Awaiting asyncio ps output…")
+        log.write_lines(content.splitlines())
 
-        self.run_worker(
-            self.capture_asyncio_ps(pid),
-            exclusive=True,
-            description=f"Inspecting PID {pid}",
-            name=f"ps-{pid}",
-        )
+    async def observe(self, pid: int, kind: str) -> None:
+        try:
+            output = None
+            if kind in {"ps", "pstree"}:
+                command = [self.python, "-m", "asyncio", kind, str(pid)]
+            else:
+                probe = await execute([self.python, "-m", "profiling.sampling", "attach", "--help"])
+                if probe.returncode:
+                    self.display("Tachyon is unavailable", probe.output +
+                                 "\nChoose a Python 3.15+ observer with --python. Match the target Python version/build.")
+                    return
+                output = artifact_path(self.output_dir, pid, kind, "html")
+                command = profile_command(self.python, pid, kind, self.duration, output)
+            result = await execute(command, timeout=self.duration + 20 if output else 20)
+            text = f"$ {shlex.join(command)}\n\n{result.output}"
+            if result.returncode:
+                self.display(f"Observation failed: PID {pid}", text +
+                             "\nCheck that the target is still running and uses asyncio.\n"
+                             "Match the observer Python version/build to the target.\n"
+                             "Permission help: https://docs.python.org/3/howto/remote_debugging.html#permission-requirements")
+                return
+            if output is not None:
+                if not output.is_file() or output.stat().st_size == 0:
+                    self.display("No profile was generated", text)
+                    return
+                self.last_profile = output
+                self.display(f"Profile complete: PID {pid} ({kind})", text +
+                             f"\nSaved: {output}\nPress O to open this profile in your browser.")
+            else:
+                key = (pid, kind)
+                previous = self.snapshots.get(key)
+                self.current_diff = None if previous is None else "".join(difflib.unified_diff(
+                    previous.splitlines(keepends=True), result.output.splitlines(keepends=True),
+                    fromfile="previous capture", tofile="current capture"))
+                self.snapshots[key] = result.output
+                self.current_snapshot = (pid, kind, result.output)
+                self.display(f"{kind}: PID {pid} · S save · D compare previous capture", text)
+        except asyncio.CancelledError:
+            self.display("Observation cancelled", "The observer stopped; the target process was not terminated.")
+            raise
+        except TimeoutError:
+            self.display("Observation timed out", "The observer stopped. Check the target and its permissions.")
+        except (OSError, ValueError) as exc:
+            self.display("Observation failed", str(exc))
+        finally:
+            self.busy = False
+
+    def action_save_snapshot(self) -> None:
+        if self.current_snapshot is None:
+            self.notify("Capture tasks or an await tree first.")
+            return
+        pid, kind, text = self.current_snapshot
+        try:
+            path = artifact_path(self.output_dir, pid, kind, "txt")
+            path.write_text(text)
+        except OSError as exc:
+            self.notify(str(exc), severity="error")
+        else:
+            self.notify(f"Saved PID {pid} {kind}: {path}", timeout=8)
+
+    def action_show_diff(self) -> None:
+        if self.busy:
+            return
+        if self.current_diff is None:
+            self.notify("Capture the same PID and view twice to compare snapshots.")
+            return
+        pid, kind, _ = self.current_snapshot
+        self.display(f"Snapshot diff: PID {pid} ({kind})", self.current_diff or "No text changes.")
+
+    def action_open_profile(self) -> None:
+        if self.last_profile is None:
+            self.notify("Create a profile with F or G first.")
+            return
+        if not webbrowser.open(self.last_profile.as_uri()):
+            self.notify(f"Open this file in a browser: {self.last_profile}", timeout=10)
 
     def refresh_process_list(self) -> None:
         """Fetch Python processes and update UI state."""
@@ -183,67 +306,3 @@ class AtvApp(App):
             output = self.query_one("#ps-output", Log)
             output.clear()
             self.query_one("#ps-title", Static).update("Awaiting selection")
-
-    async def capture_asyncio_ps(self, pid: int) -> None:
-        """Execute ``python -m asyncio ps`` for *pid* and stream the results."""
-
-        cmd = [sys.executable, "-m", "asyncio", "ps", str(pid)]
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except FileNotFoundError:
-            self._display_ps_failure(pid, "Failed to locate python executable to launch asyncio ps.")
-            return
-
-        stdout_bytes, stderr_bytes = await process.communicate()
-        stdout_text = stdout_bytes.decode("utf-8", errors="replace")
-        stderr_text = stderr_bytes.decode("utf-8", errors="replace")
-
-        self.log.debug(
-            "asyncio ps completed",
-            pid=pid,
-            returncode=process.returncode,
-            stdout_preview=stdout_text[:200],
-            stderr_preview=stderr_text[:200],
-        )
-
-        if process.returncode != 0:
-            message = stderr_text or "asyncio ps exited with a non-zero status."
-            self._display_ps_failure(pid, message.strip())
-            return
-
-        self._display_ps_success(pid, stdout_text, stderr_text)
-
-    def _display_ps_success(self, pid: int, stdout_text: str, stderr_text: str) -> None:
-        header = self.query_one("#ps-title", Static)
-        header.update(f"asyncio ps output for PID {pid}")
-        log = self.query_one("#ps-output", Log)
-        log.clear()
-        lines: list[str] = [f"$ {sys.executable} -m asyncio ps {pid}"]
-
-        if stdout_text.strip():
-            lines.append("-- stdout --")
-            lines.extend(stdout_text.splitlines())
-        else:
-            lines.append("(stdout was empty)")
-
-        if stderr_text.strip():
-            lines.append("")
-            lines.append("-- stderr --")
-            lines.extend(stderr_text.splitlines())
-
-        log.write_lines(lines)
-
-    def _display_ps_failure(self, pid: int, message: str) -> None:
-        header = self.query_one("#ps-title", Static)
-        header.update(f"Failed to capture asyncio ps for PID {pid}")
-        log = self.query_one("#ps-output", Log)
-        log.clear()
-        log.write_lines([
-            f"$ {sys.executable} -m asyncio ps {pid}",
-            "-- error --",
-            message or "asyncio ps failed with an unknown error.",
-        ])
