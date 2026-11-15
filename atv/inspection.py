@@ -8,6 +8,7 @@ from datetime import datetime
 import os
 from pathlib import Path
 import re
+import signal
 import uuid
 
 
@@ -20,24 +21,52 @@ class Result:
 
 async def execute(command: list[str], timeout: float = 20) -> Result:
     """Reap the observer on timeout/cancellation; never signal the target PID."""
-    process = await asyncio.create_subprocess_exec(
+    spawn = asyncio.create_task(asyncio.create_subprocess_exec(
         *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
         env={**os.environ, "NO_COLOR": "1", "TERM": "dumb"},
-    )
-    communication = asyncio.create_task(process.communicate())
+        start_new_session=os.name == "posix",
+    ))
+    communication = None
     try:
-        output, _ = await asyncio.wait_for(asyncio.shield(communication), timeout)
+        async with asyncio.timeout(timeout):
+            process = await asyncio.shield(spawn)
+            communication = asyncio.create_task(process.communicate())
+            output, _ = await asyncio.shield(communication)
     except (TimeoutError, asyncio.CancelledError):
-        if process.returncode is None:
+        cleanup = asyncio.create_task(stop_observer(spawn, communication))
+        while not cleanup.done():
             try:
-                process.kill()
-            except ProcessLookupError:
-                pass
-        await communication
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                # A second cancellation must not interrupt reaping the observer.
+                continue
+        cleanup.result()
         raise
     text = output.decode("utf-8", errors="replace")
     text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
     return Result(tuple(command), process.returncode, text)
+
+
+async def stop_observer(
+    spawn: asyncio.Task[asyncio.subprocess.Process],
+    communication: asyncio.Task[tuple[bytes, bytes | None]] | None,
+) -> None:
+    try:
+        process = await spawn
+    except OSError:
+        return
+    try:
+        if os.name == "posix":
+            # Children may still own the output pipe after the wrapper exits.
+            os.killpg(process.pid, signal.SIGKILL)
+        elif process.returncode is None:
+            process.kill()
+    except ProcessLookupError:
+        pass
+    if communication is None:
+        await process.communicate()
+    else:
+        await communication
 
 
 def artifact_path(directory: Path, pid: int, kind: str, suffix: str) -> Path:

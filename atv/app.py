@@ -5,16 +5,19 @@ from __future__ import annotations
 import asyncio
 import sys
 import difflib
+from functools import partial
 from pathlib import Path
 import shlex
 import webbrowser
 from typing import Iterable
 
+import psutil
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container
 from textual.coordinate import Coordinate
 from textual.widgets import DataTable, Footer, Header, Log, Static
+from textual.worker import Worker
 
 from .inspection import artifact_path, execute, profile_command
 from .processes import ProcessInfo, list_python_processes
@@ -122,12 +125,12 @@ class AtvApp(App):
         self.python = python
         self.duration = duration
         self.output_dir = (output_dir or Path.home() / ".atv" / "captures").expanduser().resolve()
-        self.snapshots: dict[tuple[int, str], str] = {}
+        self.snapshots: dict[tuple[int, float, str], str] = {}
         self.current_snapshot: tuple[int, str, str] | None = None
         self.current_diff: str | None = None
         self.last_profile: Path | None = None
         self.busy = False
-        self.operation = None
+        self.operation: Worker[None] | None = None
 
 
     BINDINGS = [
@@ -178,6 +181,10 @@ class AtvApp(App):
     def action_inspect_selected(self) -> None:
         self.start_operation("ps")
 
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if isinstance(event.data_table, ProcessTable):
+            self.action_inspect_selected()
+
     def action_inspect_tree(self) -> None:
         self.start_operation("pstree")
 
@@ -198,11 +205,17 @@ class AtvApp(App):
         self.busy = True
         self.query_one("#ps-title", Static).update(f"{kind}: observing PID {pid}…")
         self.query_one("#ps-output", Log).clear()
-        self.operation = self.run_worker(self.observe(pid, kind), name=f"{kind}-{pid}")
+        self.operation = self.run_worker(partial(self.observe, pid, kind), name=f"{kind}-{pid}")
 
     def action_cancel_operation(self) -> None:
-        if self.busy and self.operation is not None:
-            self.operation.cancel()
+        if self.operation is not None:
+            # The worker's first step is already queued. Let it enter observe()
+            # before cancelling so its finally block can clear the busy state.
+            asyncio.get_running_loop().call_soon(self.cancel_observation, self.operation)
+
+    def cancel_observation(self, operation: Worker[None]) -> None:
+        if self.operation is operation and not operation.is_cancelled:
+            operation.cancel()
 
     def display(self, title: str, content: str) -> None:
         self.query_one("#ps-title", Static).update(title)
@@ -213,7 +226,13 @@ class AtvApp(App):
     async def observe(self, pid: int, kind: str) -> None:
         try:
             output = None
+            snapshot_key = None
             if kind in {"ps", "pstree"}:
+                try:
+                    snapshot_key = (pid, psutil.Process(pid).create_time(), kind)
+                except psutil.Error:
+                    # A privileged observer may still capture this process.
+                    pass
                 command = [self.python, "-m", "asyncio", kind, str(pid)]
             else:
                 probe = await execute([self.python, "-m", "profiling.sampling", "attach", "--help"])
@@ -239,12 +258,12 @@ class AtvApp(App):
                 self.display(f"Profile complete: PID {pid} ({kind})", text +
                              f"\nSaved: {output}\nPress O to open this profile in your browser.")
             else:
-                key = (pid, kind)
-                previous = self.snapshots.get(key)
+                previous = None if snapshot_key is None else self.snapshots.get(snapshot_key)
                 self.current_diff = None if previous is None else "".join(difflib.unified_diff(
                     previous.splitlines(keepends=True), result.output.splitlines(keepends=True),
                     fromfile="previous capture", tofile="current capture"))
-                self.snapshots[key] = result.output
+                if snapshot_key is not None:
+                    self.snapshots[snapshot_key] = result.output
                 self.current_snapshot = (pid, kind, result.output)
                 self.display(f"{kind}: PID {pid} · S save · D compare previous capture", text)
         except asyncio.CancelledError:
@@ -256,6 +275,7 @@ class AtvApp(App):
             self.display("Observation failed", str(exc))
         finally:
             self.busy = False
+            self.operation = None
 
     def action_save_snapshot(self) -> None:
         if self.current_snapshot is None:
